@@ -1009,21 +1009,63 @@ function TodayScreen({ state, setState, missingDay, onResolveMissing, dismissMis
     if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
     setState(s => {
       const prepared = isToday ? s : advanceStateToDate(s, actionDate);
-      return recordWoreThis(prepared, actionDate);
+      const previousWear = prepared.actualWear?.[actionDate] ?? null;
+      const previousAttendance = prepared.attendance?.[actionDate] ?? null;
+      const next = recordWoreThis(prepared, actionDate);
+      const recordedWear = next.actualWear?.[actionDate];
+      return {
+        ...next,
+        _woreThisUndo: {
+          ...(next._woreThisUndo || {}),
+          [actionDate]: {
+            previousWear,
+            previousAttendance,
+            recordedAt: recordedWear?.recordedAt ?? null
+          }
+        }
+      };
     });
     setShowUndoWore(true);
-    undoTimerRef.current = setTimeout(() => setShowUndoWore(false), 8000);
+    if (!isToday) {
+      undoTimerRef.current = setTimeout(() => {
+        setShowUndoWore(false);
+        setState(s => {
+          const undo = { ...(s._woreThisUndo || {}) };
+          delete undo[actionDate];
+          return { ...s, _woreThisUndo: undo };
+        });
+      }, 8000);
+    }
     playSfx("confirm", state.settings.soundEnabled);
   };
 
   const undoWoreThis = () => {
     if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
     setState(s => {
+      const saved = s._woreThisUndo?.[actionDate];
+      const currentWear = s.actualWear?.[actionDate];
+
+      // For today's already-recorded Wore This, allow a direct Undo.
+      if (!saved && isToday && currentWear?.wasPlannedWorn) {
+        const actualWear = { ...s.actualWear };
+        delete actualWear[actionDate];
+        const attendance = { ...(s.attendance || {}) };
+        delete attendance[actionDate];
+        return { ...s, actualWear, attendance };
+      }
+
+      if (!saved || (saved.recordedAt && currentWear?.recordedAt !== saved.recordedAt)) return s;
+
       const actualWear = { ...s.actualWear };
       const attendance = { ...(s.attendance || {}) };
-      delete actualWear[actionDate];
-      delete attendance[actionDate];
-      return { ...s, actualWear, attendance };
+      if (saved.previousWear) actualWear[actionDate] = saved.previousWear;
+      else delete actualWear[actionDate];
+      if (saved.previousAttendance) attendance[actionDate] = saved.previousAttendance;
+      else delete attendance[actionDate];
+
+      const undo = { ...(s._woreThisUndo || {}) };
+      delete undo[actionDate];
+      return { ...s, actualWear, attendance, _woreThisUndo: undo };
     });
     setShowUndoWore(false);
     playSfx("chime", state.settings.soundEnabled);
@@ -1212,10 +1254,13 @@ function TodayScreen({ state, setState, missingDay, onResolveMissing, dismissMis
               )}
             </>
           ) : (
-            <div className="dd-glass" style={{ marginTop: 14, padding: 14, fontSize: 13, color: "var(--muted)", display: "flex", alignItems: "center", gap: 8 }}>
+            <div className="dd-glass" style={{ marginTop: 14, padding: 14, fontSize: 13, color: "var(--muted)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <CheckCircle2 size={16} color="var(--lime)" />
-              {wear.wasPlannedWorn ? "Recorded as worn." : "You logged a different outfit."}
-              <span className="dd-btn dd-btn-ghost" style={{ marginLeft: "auto", padding: "6px 10px", fontSize: 12 }} onClick={() => setWorePicker(true)}>Edit actual outfit</span>
+              <span>{wear.wasPlannedWorn ? "Recorded as worn." : "You logged a different outfit."}</span>
+              {isToday && wear && (
+                <button type="button" className="dd-btn dd-btn-ghost" style={{ marginLeft: "auto", padding: "6px 10px", fontSize: 12, color: "var(--lime)" }} onClick={undoWoreThis}>Undo</button>
+              )}
+              <span className="dd-btn dd-btn-ghost" style={{ marginLeft: isToday && !!state._woreThisUndo?.[actionDate] ? 0 : "auto", padding: "6px 10px", fontSize: 12 }} onClick={() => { setWorePicker(true); setShowUndoWore(false); }}>Edit actual outfit</span>
             </div>
           )}
         </div>
@@ -1251,7 +1296,16 @@ function TodayScreen({ state, setState, missingDay, onResolveMissing, dismissMis
       </Modal>
 
       <OutfitPickerModal open={worePicker} onClose={() => setWorePicker(false)} state={state}
-        onSubmit={(sel) => { setState(s2 => recordWoreSomethingElse(s2, t, sel)); setWorePicker(false); }} />
+        onSubmit={(sel) => {
+          setState(s2 => {
+            const next = recordWoreSomethingElse(s2, t, sel);
+            const undo = { ...(next._woreThisUndo || {}) };
+            delete undo[t];
+            return { ...next, _woreThisUndo: undo };
+          });
+          setWorePicker(false);
+          setShowUndoWore(false);
+        }} />
     </div>
   );
 }
