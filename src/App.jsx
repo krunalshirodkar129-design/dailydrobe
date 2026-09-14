@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { createPortal } from "react-dom";
 import {
   Home, Shirt as ShirtIcon, LayoutGrid, CalendarDays, BarChart3, Settings as SettingsIcon,
   RefreshCw, Plus, X, Check, ChevronRight, ChevronLeft, Shuffle, Sun, Moon, Trash2,
@@ -399,7 +400,7 @@ html, body { height:100%; margin:0; padding:0; }
 .dd-root{
   --lime:#c6ff3d; --lime-soft:#dcff8a; --pink:#ff9ecf; --pink-soft:#ffc4e3;
   --lime-fill:#c6ff3d; --pink-fill:#ff9ecf; --pink-soft-fill:#ffc4e3;
-  font-family:'Inter',ui-sans-serif,system-ui,sans-serif;
+  font-family:'Inter';
   min-height:100vh; width:100%; position:relative; transition:background .25s ease,color .25s ease;
 }
 .dd-root[data-theme='dark']{
@@ -421,7 +422,7 @@ html, body { height:100%; margin:0; padding:0; }
     var(--bg);
   color:var(--text);
 }
-.dd-root h1,.dd-root h2,.dd-root h3,.dd-heading{font-family:'Space Grotesk',ui-sans-serif,sans-serif; letter-spacing:-0.01em;}
+.dd-root h1,.dd-root h2,.dd-root h3,.dd-heading{font-family:'Space Grotesk'; letter-spacing:-0.01em;}
 .dd-glass{
   background:var(--panel); border:1px solid var(--border); border-radius:22px;
   backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px);
@@ -431,7 +432,7 @@ html, body { height:100%; margin:0; padding:0; }
 .dd-glass:hover{ border-color:var(--border-strong,var(--border)); }
 .dd-glass-strong{ background:var(--panel-strong); border:1px solid var(--border); border-radius:22px; box-shadow:0 4px 20px rgba(0,0,0,0.18); }
 .dd-btn{
-  font-family:'Space Grotesk',sans-serif; font-weight:600; border-radius:16px; padding:12px 20px;
+  font-family:'Space Grotesk'; font-weight:600; border-radius:16px; padding:12px 20px;
   display:inline-flex; align-items:center; justify-content:center; gap:8px; cursor:pointer;
   border:1px solid var(--border); transition:transform .15s ease, box-shadow .15s ease, background .2s ease;
   user-select:none;
@@ -454,7 +455,7 @@ html, body { height:100%; margin:0; padding:0; }
 .dd-nav-item.active{ background:var(--panel-strong); color:var(--lime); box-shadow:inset 0 0 0 1px var(--border); }
 .dd-input{
   width:100%; background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:11px 14px;
-  color:var(--text); font-family:'Inter',sans-serif; font-size:14px; outline:none;
+  color:var(--text); font-family:'Inter'; font-size:14px; outline:none;
 }
 .dd-input:focus{ border-color:var(--lime); }
 select.dd-input{ cursor:pointer; }
@@ -502,6 +503,7 @@ select.dd-input{ cursor:pointer; }
   .dd-landing{ transition:opacity .15s ease; }
 }
 @keyframes ddFadeSimple{ from{opacity:0;} to{opacity:1;} }
+
 `;
 
 /* ============================================================
@@ -838,19 +840,82 @@ function GarmentVisual({ item, size = 120 }) {
    ============================================================ */
 function Modal({ open, onClose, title, children, width = 480 }) {
   if (!open) return null;
-  return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
-      onClick={onClose}>
-      <div className="dd-pop dd-scrollbar" style={{ width: "100%", maxWidth: width, maxHeight: "85vh", overflowY: "auto", padding: 24, background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 22, boxShadow: "0 20px 60px rgba(0,0,0,0.4)" }}
-        onClick={e => e.stopPropagation()}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-          <h3 className="dd-heading" style={{ fontSize: 19, fontWeight: 700, margin: 0 }}>{title}</h3>
-          <div className="dd-btn dd-btn-ghost" style={{ padding: 8 }} onClick={onClose}><X size={18} /></div>
+
+  // The dialog is portaled to <body> so its position is tied to the real
+  // viewport rather than an animated/transformed DailyDrobe container.
+  // Keep the DailyDrobe theme tokens locally because the portal sits outside
+  // .dd-root, where those CSS variables are normally defined.
+  const modal = (
+    <div
+      data-dailydrobe-modal="true"
+      style={{
+        "--bg2": "#0f0f13",
+        "--panel": "rgba(255,255,255,0.045)",
+        "--panel-strong": "rgba(255,255,255,0.07)",
+        "--border": "rgba(255,255,255,0.09)",
+        "--text": "#f3f3ee",
+        "--muted": "#96968f",
+        "--lime": "#c6ff3d",
+        "--lime-fill": "#c6ff3d",
+        "--pink": "#ff9ecf",
+        "--pink-fill": "#ff9ecf",
+        position: "fixed",
+        inset: 0,
+        width: "100vw",
+        height: "100dvh",
+        boxSizing: "border-box",
+        background: "rgba(0,0,0,0.55)",
+        backdropFilter: "blur(4px)",
+        WebkitBackdropFilter: "blur(4px)",
+        zIndex: 1000,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+        overflow: "hidden",
+        overscrollBehavior: "contain"
+      }}
+      onClick={onClose}
+    >
+      <style>{`
+        [data-dailydrobe-modal] *,
+        [data-dailydrobe-modal] *::before,
+        [data-dailydrobe-modal] *::after { box-sizing: border-box; }
+        [data-dailydrobe-modal] .dd-modal-content { color: #f3f3ee !important; font-family: 'Inter' !important; }
+        [data-dailydrobe-modal] .dd-modal-content strong { color: #f3f3ee !important; }
+        [data-dailydrobe-modal] .dd-btn-primary { background: #c6ff3d !important; color: #0a0a0d !important; }
+      `}</style>
+      <div
+        className="dd-pop dd-scrollbar dd-modal-content"
+        style={{
+          width: `min(${width}px, calc(100vw - 32px))`,
+          maxWidth: `calc(100vw - 32px)`,
+          maxHeight: "85dvh",
+          overflowY: "auto",
+          overflowX: "hidden",
+          boxSizing: "border-box",
+          padding: 24,
+          background: "#0f0f13",
+          color: "#f3f3ee",
+          fontFamily: "'Inter'",
+          border: "1px solid rgba(255,255,255,0.09)",
+          borderRadius: 22,
+          boxShadow: "0 20px 60px rgba(0,0,0,0.4)"
+        }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18, minWidth: 0 }}>
+          <h3 className="dd-heading" style={{ fontSize: 19, fontWeight: 700, margin: 0, color: "#c6ff3d" }}>{title}</h3>
+          <div className="dd-btn dd-btn-ghost" style={{ padding: 8, flexShrink: 0, color: "#f3f3ee" }} onClick={onClose}><X size={18} /></div>
         </div>
-        {children}
+        <div style={{ minWidth: 0 }}>
+          {children}
+        </div>
       </div>
     </div>
   );
+
+  return createPortal(modal, document.body);
 }
 
 function StatusPill({ status }) {
@@ -1144,7 +1209,7 @@ function WardrobeScreen({ state, setState }) {
         ))}
       </div>
 
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+      <div className="dd-wardrobe-tools" style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
         <div className="dd-glass" style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 14px", flex: "1 1 200px" }}>
           <Search size={15} color="var(--muted)" />
           <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search…" style={{ background: "transparent", border: "none", outline: "none", color: "var(--text)", fontSize: 13, width: "100%" }} />
@@ -1735,7 +1800,7 @@ function InsightsScreen({ state }) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 12 }}>
         {[["Wardrobe size", totalWardrobe], ["Office days (mo.)", monthOfficeDays], ["Outfits worn (mo.)", monthWorn], ["Utilization", `${utilization}%`]].map(([label, val]) => (
           <div key={label} className="dd-glass" style={{ padding: 16, textAlign: "center" }}>
-            <div style={{ fontSize: 26, fontWeight: 700, fontFamily: "'Space Grotesk',sans-serif", color: "var(--lime)" }}>{val}</div>
+            <div style={{ fontSize: 26, fontWeight: 700, fontFamily: "'Space Grotesk'", color: "var(--lime)" }}>{val}</div>
             <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>{label}</div>
           </div>
         ))}
@@ -2045,7 +2110,7 @@ function LandingScreen({ onEnter, exiting, state }) {
 
   return (
     <div className={`dd-landing${exiting ? " exiting" : ""}`}>
-      <div className="dd-landing-logo" style={{ fontFamily: "'Space Grotesk',sans-serif", fontWeight: 700, fontSize: 38 }}>
+      <div className="dd-landing-logo" style={{ fontFamily: "'Space Grotesk'", fontWeight: 700, fontSize: 38 }}>
         DAILY<span style={{ color: "var(--lime)" }}>DROBE</span>
       </div>
       <div className="dd-landing-line" style={{ width: 64 }} />
@@ -2145,7 +2210,7 @@ export default function App() {
     return (
       <div className="dd-root" data-theme="dark" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 400 }}>
         <style>{GLOBAL_STYLE}</style>
-        <div style={{ color: "var(--muted)", fontFamily: "sans-serif" }}>Loading DailyDrobe…</div>
+        <div style={{ color: "var(--muted)", fontFamily: "'Inter'" }}>Loading DailyDrobe…</div>
       </div>
     );
   }
@@ -2189,7 +2254,7 @@ export default function App() {
       <style>{GLOBAL_STYLE}</style>
       <div style={{ display: "flex", minHeight: "100%" }}>
         <div className="dd-scrollbar" style={{ width: 230, flexShrink: 0, padding: 20, display: "none", flexDirection: "column" }} id="dd-sidebar">
-          <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontWeight: 700, fontSize: 19, marginBottom: 2 }}>DAILY<span style={{ color: "var(--lime)" }}>DROBE</span></div>
+          <div style={{ fontFamily: "'Space Grotesk'", fontWeight: 700, fontSize: 19, marginBottom: 2 }}>DAILY<span style={{ color: "var(--lime)" }}>DROBE</span></div>
           <div style={{ fontSize: 10.5, color: "var(--muted)", marginBottom: 24, letterSpacing: 0.3 }}>Your Style. Smarter. Everyday.</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             {NAV_ITEMS.map(n => (
