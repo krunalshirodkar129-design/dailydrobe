@@ -881,6 +881,20 @@ function Modal({ open, onClose, title, children, width = 480 }) {
         [data-dailydrobe-modal] *,
         [data-dailydrobe-modal] *::before,
         [data-dailydrobe-modal] *::after { box-sizing: border-box; }
+        [data-dailydrobe-modal] select.dd-input {
+          background: #161619 !important;
+          color: #f3f3ee !important;
+          color-scheme: dark;
+        }
+        [data-dailydrobe-modal] select.dd-input option,
+        [data-dailydrobe-modal] select.dd-input optgroup {
+          background: #161619 !important;
+          color: #f3f3ee !important;
+        }
+        [data-dailydrobe-modal] select.dd-input option:checked {
+          background: #c6ff3d !important;
+          color: #0a0a0d !important;
+        }
         [data-dailydrobe-modal] .dd-modal-content { color: #f3f3ee !important; font-family: 'Inter' !important; }
         [data-dailydrobe-modal] .dd-modal-content strong { color: #f3f3ee !important; }
         [data-dailydrobe-modal] .dd-btn-primary { background: #c6ff3d !important; color: #0a0a0d !important; }
@@ -1398,6 +1412,7 @@ function LooksScreen({ state, setState }) {
   const [showBuilder, setShowBuilder] = useState(false);
   const [showRetired, setShowRetired] = useState(false);
   const [editingLook, setEditingLook] = useState(null);
+  const [deleteLookTarget, setDeleteLookTarget] = useState(null);
   const [menuOpenId, setMenuOpenId] = useState(null);
   const lookStats = useMemo(() => computeLookStats(state), [state.actualWear]);
   const inRotationIds = useMemo(() => new Set(state.rotationSlots.filter(s => s.lookId).map(s => s.lookId)), [state.rotationSlots]);
@@ -1408,6 +1423,15 @@ function LooksScreen({ state, setState }) {
 
   const retireLook = (id) => setState(s => ({ ...s, looks: { ...s.looks, [id]: { ...s.looks[id], status: "retired" } } }));
   const restoreLook = (id) => setState(s => ({ ...s, looks: { ...s.looks, [id]: { ...s.looks[id], status: "active" } } }));
+  const deleteLook = (id) => setState(s => {
+    const looksNext = { ...s.looks };
+    delete looksNext[id];
+    const rotationSlotsNext = s.rotationSlots.map(slot => slot.lookId === id ? { ...slot, lookId: null } : slot);
+    const dailyPlansNext = Object.fromEntries(Object.entries(s.dailyPlans || {}).map(([date, plan]) => [
+      date, plan && plan.lookId === id ? { ...plan, lookId: null } : plan
+    ]));
+    return { ...s, looks: looksNext, rotationSlots: rotationSlotsNext, dailyPlans: dailyPlansNext };
+  });
 
   return (
     <div className="dd-fade-in" style={{ display: "flex", flexDirection: "column", gap: 18 }} onClick={() => setMenuOpenId(null)}>
@@ -1447,6 +1471,7 @@ function LooksScreen({ state, setState }) {
                       {l.status !== "retired"
                         ? <div style={{ padding: "8px 10px", fontSize: 12.5, borderRadius: 8, cursor: "pointer" }} onClick={() => { retireLook(l.id); setMenuOpenId(null); }}>Retire</div>
                         : <div style={{ padding: "8px 10px", fontSize: 12.5, borderRadius: 8, cursor: "pointer" }} onClick={() => { restoreLook(l.id); setMenuOpenId(null); }}>Restore</div>}
+                      <div style={{ padding: "8px 10px", fontSize: 12.5, borderRadius: 8, cursor: "pointer", color: "var(--pink)" }} onClick={() => { setDeleteLookTarget(l); setMenuOpenId(null); }}>Delete</div>
                     </div>
                   )}
                 </div>
@@ -1471,6 +1496,17 @@ function LooksScreen({ state, setState }) {
       <Modal open={showBuilder} onClose={() => setShowBuilder(false)} title="New Approved Look">
         <LookBuilderInline state={state} setState={setState} onDone={() => setShowBuilder(false)} />
       </Modal>
+
+      {deleteLookTarget && (
+        <Modal open={true} onClose={() => setDeleteLookTarget(null)} title="Delete Look">
+          <p style={{ fontSize: 14, marginTop: 0 }}>Delete <strong>{deleteLookTarget.name}</strong>?</p>
+          <p style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5 }}>This removes the Look from Approved Looks and clears any rotation or daily-plan references to it. Your clothing items are not affected.</p>
+          <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+            <div className="dd-btn dd-btn-pink" style={{ flex: 1 }} onClick={() => { deleteLook(deleteLookTarget.id); setDeleteLookTarget(null); }}>Delete</div>
+            <div className="dd-btn dd-btn-ghost dd-glass" style={{ flex: 1 }} onClick={() => setDeleteLookTarget(null)}>Cancel</div>
+          </div>
+        </Modal>
+      )}
 
       {editingLook && (
         <Modal open={true} onClose={() => setEditingLook(null)} title="Edit Look">
