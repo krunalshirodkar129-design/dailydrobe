@@ -369,8 +369,17 @@ function markNotGoingToOffice(state, dateStr) {
   const plan = state.dailyPlans[dateStr];
   if (!plan || plan.status !== "office") return state;
   const rotationSequence = plan.rotationSequence ?? plan.sequence ?? state.rotationCursor;
+  const undo = {
+    ...(state._noOfficeUndo || {}),
+    [dateStr]: {
+      plan: deepClone(plan),
+      rotationCursor: state.rotationCursor,
+      attendance: state.attendance?.[dateStr] ?? null
+    }
+  };
   return {
     ...state,
+    _noOfficeUndo: undo,
     dailyPlans: { ...state.dailyPlans, [dateStr]: { ...plan, status: "no-office", noOfficeReason: "user" } },
     // Put the rotation cursor back so this day's Look is carried forward.
     rotationCursor: rotationSequence,
@@ -978,6 +987,7 @@ function TodayScreen({ state, setState, missingDay, onResolveMissing, dismissMis
   const [dayOffset, setDayOffset] = useState(0);
   const isToday = dayOffset === 0;
   const viewDate = addDays(t, dayOffset);
+  const actionDate = viewDate;
   const viewState = useMemo(() => (isToday ? state : advanceStateToDate(state, viewDate)), [state, dayOffset, viewDate, isToday]);
 
   const plan = viewState.dailyPlans[viewDate];
@@ -985,14 +995,79 @@ function TodayScreen({ state, setState, missingDay, onResolveMissing, dismissMis
   const look = plan && plan.lookId ? viewState.looks[plan.lookId] : null;
   const [pickerOpen, setPickerOpen] = useState(false);
   const [worePicker, setWorePicker] = useState(false); // for "wore something else" today
+  const [showUndoWore, setShowUndoWore] = useState(false);
+  const [showUndoNoOffice, setShowUndoNoOffice] = useState(false);
+  const undoTimerRef = useRef(null);
+  const undoNoOfficeTimerRef = useRef(null);
+  const undoNoOfficeSnapshotRef = useRef(null);
 
   const shirt = look ? viewState.clothingItems[look.shirtId] : null;
   const pants = look ? viewState.clothingItems[look.pantsId] : null;
   const shoes = look ? viewState.clothingItems[look.shoesId] : null;
 
-  const woreThis = () => { setState(s => recordWoreThis(s, t)); playSfx("confirm", state.settings.soundEnabled); };
-  const tryAnother = () => { setState(s => tryAnotherLook(s, t)); playSfx("chime", state.settings.soundEnabled); };
-  const notGoingToOffice = () => { setState(s => markNotGoingToOffice(s, t)); playSfx("chime", state.settings.soundEnabled); };
+  const woreThis = () => {
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    setState(s => {
+      const prepared = isToday ? s : advanceStateToDate(s, actionDate);
+      return recordWoreThis(prepared, actionDate);
+    });
+    setShowUndoWore(true);
+    undoTimerRef.current = setTimeout(() => setShowUndoWore(false), 8000);
+    playSfx("confirm", state.settings.soundEnabled);
+  };
+
+  const undoWoreThis = () => {
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    setState(s => {
+      const actualWear = { ...s.actualWear };
+      const attendance = { ...(s.attendance || {}) };
+      delete actualWear[actionDate];
+      delete attendance[actionDate];
+      return { ...s, actualWear, attendance };
+    });
+    setShowUndoWore(false);
+    playSfx("chime", state.settings.soundEnabled);
+  };
+
+  useEffect(() => () => {
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    if (undoNoOfficeTimerRef.current) clearTimeout(undoNoOfficeTimerRef.current);
+  }, []);
+  const tryAnother = () => {
+    setState(s => {
+      const prepared = isToday ? s : advanceStateToDate(s, actionDate);
+      return tryAnotherLook(prepared, actionDate);
+    });
+    playSfx("chime", state.settings.soundEnabled);
+  };
+  const notGoingToOffice = () => {
+    if (undoNoOfficeTimerRef.current) clearTimeout(undoNoOfficeTimerRef.current);
+    setState(s => {
+      const prepared = isToday ? s : advanceStateToDate(s, actionDate);
+      undoNoOfficeSnapshotRef.current = prepared;
+      return markNotGoingToOffice(prepared, actionDate);
+    });
+    setShowUndoNoOffice(true);
+    playSfx("chime", state.settings.soundEnabled);
+  };
+
+  const undoNotGoingToOffice = () => {
+    if (undoNoOfficeTimerRef.current) clearTimeout(undoNoOfficeTimerRef.current);
+    setState(s => {
+      const saved = s._noOfficeUndo?.[actionDate];
+      if (!saved) return s;
+      const dailyPlans = { ...s.dailyPlans, [actionDate]: saved.plan };
+      const attendance = { ...(s.attendance || {}) };
+      if (saved.attendance) attendance[actionDate] = saved.attendance;
+      else delete attendance[actionDate];
+      const undo = { ...(s._noOfficeUndo || {}) };
+      delete undo[actionDate];
+      return { ...s, dailyPlans, attendance, rotationCursor: saved.rotationCursor, _noOfficeUndo: undo };
+    });
+    undoNoOfficeSnapshotRef.current = null;
+    setShowUndoNoOffice(false);
+    playSfx("chime", state.settings.soundEnabled);
+  };
 
   const activeApprovedLooks = useMemo(() => Object.values(state.looks).filter(l => l.status === "active" && lookIsAvailable(l, state.clothingItems)), [state.looks, state.clothingItems]);
 
@@ -1068,6 +1143,13 @@ function TodayScreen({ state, setState, missingDay, onResolveMissing, dismissMis
               </div>
             </div>
           )}
+          {plan.noOfficeReason === "user" && (showUndoNoOffice || !!state._noOfficeUndo?.[actionDate]) && (
+            <div className="dd-glass" style={{ marginTop: 14, marginLeft: 24, padding: "10px 12px", display: "inline-flex", alignItems: "center", gap: 10, color: "var(--muted)", fontSize: 13 }}>
+              <XCircle size={16} color="var(--pink)" />
+              <span>Marked as Not Going to Office.</span>
+              <button type="button" className="dd-btn dd-btn-ghost" style={{ padding: "6px 10px", fontSize: 12, color: "var(--lime)" }} onClick={undoNotGoingToOffice}>Undo</button>
+            </div>
+          )}
         </div>
       )}
 
@@ -1107,25 +1189,33 @@ function TodayScreen({ state, setState, missingDay, onResolveMissing, dismissMis
             </div>
           </div>
 
-          {isToday ? (
-            !wear ? (
+          {!wear ? (
+            <>
               <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
-                <div className="dd-btn dd-btn-primary" style={{ flex: "1 1 160px" }} onClick={woreThis}><Check size={17} /> Wore This</div>
+                <div className="dd-btn dd-btn-primary" style={{ flex: "1 1 160px" }} onClick={woreThis}><Check size={17} /> Wore this {isToday ? "today" : "this day"}</div>
                 <div className="dd-btn dd-btn-ghost dd-glass" style={{ flex: "1 1 140px" }} onClick={tryAnother}><Shuffle size={17} /> Try Another</div>
                 <div className="dd-btn dd-btn-ghost dd-glass" style={{ flex: "1 1 160px", color: "var(--pink)" }} onClick={notGoingToOffice}><XCircle size={17} /> Not Going to Office</div>
                 <div className="dd-btn dd-btn-ghost dd-glass" style={{ flex: "1 1 140px" }} onClick={() => setPickerOpen(true)}><LayoutGrid size={17} /> Choose Myself</div>
               </div>
-            ) : (
-              <div className="dd-glass" style={{ marginTop: 14, padding: 14, fontSize: 13, color: "var(--muted)", display: "flex", alignItems: "center", gap: 8 }}>
-                <CheckCircle2 size={16} color="var(--lime)" />
-                {wear.wasPlannedWorn ? "Recorded as worn today." : "You logged a different outfit for today."}
-                <span className="dd-btn dd-btn-ghost" style={{ marginLeft: "auto", padding: "6px 10px", fontSize: 12 }} onClick={() => setWorePicker(true)}>Edit actual outfit</span>
-              </div>
-            )
+              {showUndoWore && (
+                <div className="dd-glass" style={{ marginTop: 10, padding: "10px 12px", display: "flex", alignItems: "center", gap: 10, color: "var(--muted)", fontSize: 13 }}>
+                  <CheckCircle2 size={16} color="var(--lime)" />
+                  <span>Recorded as worn {isToday ? "today" : "for this day"}.</span>
+                  <button type="button" className="dd-btn dd-btn-ghost" style={{ marginLeft: "auto", padding: "6px 10px", fontSize: 12, color: "var(--lime)" }} onClick={undoWoreThis}>Undo</button>
+                </div>
+              )}
+              {!isToday && (
+                <div className="dd-glass" style={{ marginTop: 14, padding: 14, fontSize: 12, color: "var(--muted)", display: "flex", alignItems: "center", gap: 8 }}>
+                  <Clock size={14} />
+                  Preview based on the current rotation & wardrobe availability — it may change if something is used, laundered, or retired before then.
+                </div>
+              )}
+            </>
           ) : (
-            <div className="dd-glass" style={{ marginTop: 14, padding: 14, fontSize: 12, color: "var(--muted)", display: "flex", alignItems: "center", gap: 8 }}>
-              <Clock size={14} />
-              Preview based on the current rotation & wardrobe availability — it may change if something is used, laundered, or retired before then.
+            <div className="dd-glass" style={{ marginTop: 14, padding: 14, fontSize: 13, color: "var(--muted)", display: "flex", alignItems: "center", gap: 8 }}>
+              <CheckCircle2 size={16} color="var(--lime)" />
+              {wear.wasPlannedWorn ? "Recorded as worn." : "You logged a different outfit."}
+              <span className="dd-btn dd-btn-ghost" style={{ marginLeft: "auto", padding: "6px 10px", fontSize: 12 }} onClick={() => setWorePicker(true)}>Edit actual outfit</span>
             </div>
           )}
         </div>
@@ -1138,7 +1228,14 @@ function TodayScreen({ state, setState, missingDay, onResolveMissing, dismissMis
             const s = state.clothingItems[l.shirtId], p = state.clothingItems[l.pantsId], sh = state.clothingItems[l.shoesId];
             return (
               <div key={l.id} className="dd-glass" style={{ padding: 12, display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}
-                onClick={() => { setState(s2 => chooseLookManually(s2, t, l.id)); setPickerOpen(false); playSfx("chime", state.settings.soundEnabled); }}>
+                onClick={() => {
+                  setState(s2 => {
+                    const prepared = isToday ? s2 : advanceStateToDate(s2, actionDate);
+                    return chooseLookManually(prepared, actionDate, l.id);
+                  });
+                  setPickerOpen(false);
+                  playSfx("chime", state.settings.soundEnabled);
+                }}>
                 <div style={{ display: "flex", gap: 4 }}>
                   <GarmentVisual item={s} size={34} /><GarmentVisual item={p} size={34} /><GarmentVisual item={sh} size={34} />
                 </div>
@@ -2413,3 +2510,4 @@ export default function App() {
     </div>
   );
 }
+
