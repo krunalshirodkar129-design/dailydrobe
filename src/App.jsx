@@ -474,8 +474,19 @@ select.dd-input{ cursor:pointer; }
 .dd-slot.drop-target{ box-shadow:0 0 0 2px var(--lime) inset; }
 
 .dd-landing{
-  min-height:100vh; width:100%; display:flex; flex-direction:column; align-items:center; justify-content:center;
-  gap:20px; padding:32px; text-align:center; transition:opacity .32s ease, transform .32s ease;
+  min-height:100vh; min-height:100dvh; width:100%; box-sizing:border-box;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:20px; padding:32px; text-align:center; overflow-x:hidden;
+  transition:opacity .32s ease, transform .32s ease;
+}
+.dd-landing > *{ max-width:100%; box-sizing:border-box; }
+@media (max-width: 600px){
+  .dd-landing{ padding:24px 20px; gap:18px; }
+  .dd-landing-logo{ font-size:34px !important; line-height:1.05; white-space:nowrap; }
+  .dd-landing-copy{ width:100%; }
+  .dd-landing-copy > div{ margin-bottom:12px !important; }
+  .dd-landing-copy p{ max-width:280px; }
+  .dd-landing-cta{ width:100%; display:flex; justify-content:center; }
 }
 .dd-landing.exiting{ opacity:0; transform:scale(0.98); }
 @keyframes ddRise{ from{opacity:0; transform:translateY(16px);} to{opacity:1; transform:translateY(0);} }
