@@ -230,6 +230,7 @@ function buildInitialState() {
     lastProcessedDate: null,
     dailyPlans: {},
     actualWear: {},
+    attendance: {},
     settings: { officeDays: [1, 2, 3, 4, 5], theme: "dark", soundEnabled: false },
     originalSnapshot: snapshot,
     importedAt: Date.now()
@@ -283,6 +284,7 @@ function advanceStateToDate(state, targetDate) {
         dailyPlans[cursorDate] = {
           status: "office",
           sequence,
+          rotationSequence: sequence,
           lookId,
           skippedSequences,
           source: "rotation",
@@ -336,7 +338,11 @@ function recordWoreThis(state, dateStr) {
     actualShirtId: look.shirtId, actualPantsId: look.pantsId, actualShoesId: look.shoesId,
     wasPlannedWorn: true, wasSkipped: false, recordedAt: Date.now()
   };
-  return { ...state, actualWear: { ...state.actualWear, [dateStr]: wear } };
+  return {
+    ...state,
+    actualWear: { ...state.actualWear, [dateStr]: wear },
+    attendance: { ...(state.attendance || {}), [dateStr]: { status: "present", recordedAt: Date.now() } }
+  };
 }
 
 function recordWoreSomethingElse(state, dateStr, { shirtId, pantsId, shoesId }) {
@@ -352,7 +358,24 @@ function recordWoreSomethingElse(state, dateStr, { shirtId, pantsId, shoesId }) 
     actualShirtId: shirtId, actualPantsId: pantsId, actualShoesId: shoesId,
     wasPlannedWorn: false, wasSkipped: true, recordedAt: Date.now()
   };
-  return { ...state, actualWear: { ...state.actualWear, [dateStr]: wear } };
+  return {
+    ...state,
+    actualWear: { ...state.actualWear, [dateStr]: wear },
+    attendance: { ...(state.attendance || {}), [dateStr]: { status: "present", recordedAt: Date.now() } }
+  };
+}
+
+function markNotGoingToOffice(state, dateStr) {
+  const plan = state.dailyPlans[dateStr];
+  if (!plan || plan.status !== "office") return state;
+  const rotationSequence = plan.rotationSequence ?? plan.sequence ?? state.rotationCursor;
+  return {
+    ...state,
+    dailyPlans: { ...state.dailyPlans, [dateStr]: { ...plan, status: "no-office", noOfficeReason: "user" } },
+    // Put the rotation cursor back so this day's Look is carried forward.
+    rotationCursor: rotationSequence,
+    attendance: { ...(state.attendance || {}), [dateStr]: { status: "absent", recordedAt: Date.now() } }
+  };
 }
 
 /* ============================================================
@@ -969,6 +992,7 @@ function TodayScreen({ state, setState, missingDay, onResolveMissing, dismissMis
 
   const woreThis = () => { setState(s => recordWoreThis(s, t)); playSfx("confirm", state.settings.soundEnabled); };
   const tryAnother = () => { setState(s => tryAnotherLook(s, t)); playSfx("chime", state.settings.soundEnabled); };
+  const notGoingToOffice = () => { setState(s => markNotGoingToOffice(s, t)); playSfx("chime", state.settings.soundEnabled); };
 
   const activeApprovedLooks = useMemo(() => Object.values(state.looks).filter(l => l.status === "active" && lookIsAvailable(l, state.clothingItems)), [state.looks, state.clothingItems]);
 
@@ -1088,6 +1112,7 @@ function TodayScreen({ state, setState, missingDay, onResolveMissing, dismissMis
               <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
                 <div className="dd-btn dd-btn-primary" style={{ flex: "1 1 160px" }} onClick={woreThis}><Check size={17} /> Wore This</div>
                 <div className="dd-btn dd-btn-ghost dd-glass" style={{ flex: "1 1 140px" }} onClick={tryAnother}><Shuffle size={17} /> Try Another</div>
+                <div className="dd-btn dd-btn-ghost dd-glass" style={{ flex: "1 1 160px", color: "var(--pink)" }} onClick={notGoingToOffice}><XCircle size={17} /> Not Going to Office</div>
                 <div className="dd-btn dd-btn-ghost dd-glass" style={{ flex: "1 1 140px" }} onClick={() => setPickerOpen(true)}><LayoutGrid size={17} /> Choose Myself</div>
               </div>
             ) : (
@@ -1788,6 +1813,35 @@ function DayDetailModal({ state, setState, dateStr, onClose }) {
   );
 }
 
+function attendanceSummary(state, startDate, endDate) {
+  const officeDays = new Set(state.settings.officeDays || []);
+  let scheduled = 0, present = 0, absent = 0, unrecorded = 0;
+  let d = startDate;
+  while (d <= endDate) {
+    if (officeDays.has(parseDate(d).getDay())) {
+      scheduled++;
+      const attendance = state.attendance?.[d];
+      if (attendance?.status === "present" || state.actualWear?.[d]) present++;
+      else if (attendance?.status === "absent") absent++;
+      else unrecorded++;
+    }
+    d = addDays(d, 1);
+  }
+  return { scheduled, present, absent, unrecorded, percentage: scheduled ? Math.round((present / scheduled) * 100) : 0 };
+}
+
+function startOfMonth(dateStr) {
+  const d = parseDate(dateStr);
+  d.setDate(1);
+  return fmtDate(d);
+}
+
+function startOfQuarter(dateStr) {
+  const d = parseDate(dateStr);
+  d.setMonth(Math.floor(d.getMonth() / 3) * 3, 1);
+  return fmtDate(d);
+}
+
 /* ============================================================
    INSIGHTS SCREEN
    ============================================================ */
@@ -1801,6 +1855,8 @@ function InsightsScreen({ state }) {
   const leastWorn = [...worn].sort((a, b) => counts[a.id] - counts[b.id]).slice(0, 5);
 
   const today = todayStr();
+  const monthAttendance = attendanceSummary(state, startOfMonth(today), today);
+  const quarterAttendance = attendanceSummary(state, startOfQuarter(today), today);
   const gaps = worn.map(i => ({ item: i, days: Math.round((parseDate(today) - parseDate(lastWorn[i.id])) / 86400000) }));
   const avgGap = gaps.length ? gaps.reduce((a, b) => a + b.days, 0) / gaps.length : 0;
   const notWornRecently = gaps.filter(g => g.days > avgGap && g.days > 0).sort((a, b) => b.days - a.days).slice(0, 6);
@@ -1838,6 +1894,24 @@ function InsightsScreen({ state }) {
           <div key={label} className="dd-glass" style={{ padding: 16, textAlign: "center" }}>
             <div style={{ fontSize: 26, fontWeight: 700, fontFamily: "'Space Grotesk'", color: "var(--lime)" }}>{val}</div>
             <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>{label}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12 }}>
+        {[
+          ["This month’s attendance", monthAttendance],
+          ["This quarter’s attendance", quarterAttendance]
+        ].map(([label, a]) => (
+          <div key={label} className="dd-glass" style={{ padding: 16 }}>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted)", letterSpacing: 0.6 }}>{label.toUpperCase()}</div>
+                <div style={{ fontSize: 27, fontWeight: 700, fontFamily: "'Space Grotesk'", color: "var(--lime)", marginTop: 4 }}>{a.present}/{a.scheduled} days</div>
+              </div>
+              <div style={{ fontSize: 27, fontWeight: 700, fontFamily: "'Space Grotesk'", color: "var(--lime)" }}>{a.percentage}%</div>
+            </div>
+            <div style={{ marginTop: 8, fontSize: 11, color: "var(--muted2)" }}>{a.absent} absent · {a.unrecorded} unrecorded</div>
           </div>
         ))}
       </div>
@@ -2201,7 +2275,8 @@ export default function App() {
         if (res && res.value) loadedState = JSON.parse(res.value);
       } catch (e) { /* no saved state yet */ }
       if (!loadedState) loadedState = buildInitialState();
-      // migrate: older saved states may predate the sound-effects preference
+      // migrate older saved states
+      loadedState.attendance = loadedState.attendance || {};
       loadedState.settings = { soundEnabled: false, ...loadedState.settings };
       loadedState = advanceStateToDate(loadedState, todayStr());
       setStateRaw(loadedState);
